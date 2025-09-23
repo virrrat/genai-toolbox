@@ -76,7 +76,9 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	// An empty parameters object will generate the correct empty schema.
-	allParameters := tools.Parameters{}
+	allParameters := tools.Parameters{
+	    tools.NewStringParameter("clusterName", "The name of the cluster"),
+	}
 
 	mcpManifest := tools.McpManifest{
 		Name:        cfg.Name,
@@ -88,6 +90,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		Name:        cfg.Name,
 		Kind:        kind,
 		Source:      ds,
+		AllParams:   allParameters,
 		manifest:    tools.Manifest{Description: desc, Parameters: allParameters.Manifest()},
 		mcpManifest: mcpManifest,
 	}, nil
@@ -99,7 +102,8 @@ type Tool struct {
 	Kind        string `yaml:"kind"`
 	Description string `yaml:"description"`
 
-	Source *dataproc.Source
+	Source    *dataproc.Source
+	AllParams tools.Parameters
 
 	manifest    tools.Manifest
 	mcpManifest tools.McpManifest
@@ -107,9 +111,16 @@ type Tool struct {
 
 // Invoke executes the tool's operation.
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
+	paramsMap := params.AsMap()
+	clusterName, ok := paramsMap["clusterName"].(string)
+
 	req := &dataprocpb.ListClustersRequest{
 		ProjectId: t.Source.Project,
 		Region:    t.Source.Region,
+	}
+
+	if ok {
+	    req.Filter = fmt.Sprintf("clusterName = %s", clusterName)
 	}
 
 	var clusters []*dataprocpb.Cluster
@@ -147,7 +158,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 
 // ParseParams parses and validates the input parameters.
 func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (tools.ParamValues, error) {
-	return nil, nil
+	return tools.ParseParams(t.AllParams, data, claims)
 }
 
 // Manifest returns the tool's manifest.
