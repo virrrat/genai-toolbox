@@ -16,7 +16,9 @@ package dataproclistclusters
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	dataprocpb "cloud.google.com/go/dataproc/apiv1/dataprocpb"
 	"github.com/goccy/go-yaml"
@@ -75,9 +77,10 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		desc = "Lists all available Dataproc Spark clusters"
 	}
 
-	// An empty parameters object will generate the correct empty schema.
+	// Optional params
 	allParameters := tools.Parameters{
-	    tools.NewStringParameter("clusterName", "The name of the cluster"),
+	    tools.NewStringParameterWithRequired("clusterName", "Optional:The name of the cluster", false),
+	    tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
 	}
 
 	mcpManifest := tools.McpManifest{
@@ -109,18 +112,44 @@ type Tool struct {
 	mcpManifest tools.McpManifest
 }
 
-// Invoke executes the tool's operation.
-func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
+func CreateClusterFilter(params tools.ParamValues) (string, error) {
 	paramsMap := params.AsMap()
 	clusterName, ok := paramsMap["clusterName"].(string)
+
+	var filterParts []string
+
+	if ok && clusterName != "" {
+	    part := fmt.Sprintf("clusterName = %s", clusterName)
+	    filterParts = append(filterParts, part)
+	}
+
+	labelsJsonString, ok := paramsMap["labels"].(string)
+
+	if ok && labelsJsonString != "" && labelsJsonString != "{}" {
+	    var labels map[string]string
+	    json.Unmarshal([]byte(labelsJsonString), &labels)
+
+        for key, value := range labels {
+            // Construct each label filter part as "labels.KEY = VALUE"
+            part := fmt.Sprintf("labels.%s = %s", key, value)
+            filterParts = append(filterParts, part)
+        }
+	}
+	// Join the parts with " AND "
+	return strings.Join(filterParts, " AND "), nil
+}
+
+// Invoke executes the tool's operation.
+func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
+	filter, err := CreateClusterFilter(params)
 
 	req := &dataprocpb.ListClustersRequest{
 		ProjectId: t.Source.Project,
 		Region:    t.Source.Region,
 	}
 
-	if ok {
-	    req.Filter = fmt.Sprintf("clusterName = %s", clusterName)
+	if err == nil {
+	    req.Filter = filter
 	}
 
 	var clusters []*dataprocpb.Cluster
