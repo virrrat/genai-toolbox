@@ -81,6 +81,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	allParameters := tools.Parameters{
 	    tools.NewStringParameterWithRequired("clusterName", "Optional:The name of the cluster", false),
 	    tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
+	    tools.NewStringParameterWithRequired("status", "Optional: One of the following: `ACTIVE`, `INACTIVE`, `CREATING`, `RUNNING`, `ERROR`, `DELETING`, `UPDATING`, `STOPPING`, or `STOPPED`", false),
 	}
 
 	mcpManifest := tools.McpManifest{
@@ -114,12 +115,18 @@ type Tool struct {
 
 func CreateClusterFilter(params tools.ParamValues) (string, error) {
 	paramsMap := params.AsMap()
-	clusterName, ok := paramsMap["clusterName"].(string)
 
 	var filterParts []string
 
+	clusterName, ok := paramsMap["clusterName"].(string)
 	if ok && clusterName != "" {
 	    part := fmt.Sprintf("clusterName = %s", clusterName)
+	    filterParts = append(filterParts, part)
+	}
+
+	status, ok := paramsMap["status"].(string)
+	if ok && status != "" {
+	    part := fmt.Sprintf("status.state = %s", status)
 	    filterParts = append(filterParts, part)
 	}
 
