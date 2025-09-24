@@ -58,7 +58,7 @@ func (r Config) SourceConfigKind() string {
 }
 
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
-	client, err := initDataprocConnection(ctx, tracer, r.Name, r.Region)
+	clusterClient, jobClient, err := initDataprocConnection(ctx, tracer, r.Name, r.Region)
 	if err != nil {
 		return nil, fmt.Errorf("error creating dataproc client: %w", err)
 	}
@@ -68,7 +68,8 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		Kind:    SourceKind,
 		Project: r.Project,
 		Region:  r.Region,
-		Client:  client,
+		ClusterClient: clusterClient,
+		JobClient:     jobClient,
 	}
 	return s, nil
 }
@@ -80,7 +81,8 @@ type Source struct {
 	Kind    string `yaml:"kind"`
 	Project string
 	Region  string
-	Client  *dataprocapi.ClusterControllerClient
+	ClusterClient  *dataprocapi.ClusterControllerClient
+	JobClient     *dataprocapi.JobControllerClient
 }
 
 func (s *Source) SourceKind() string {
@@ -92,25 +94,37 @@ func initDataprocConnection(
 	tracer trace.Tracer,
 	name string,
 	region string,
-) (*dataprocapi.ClusterControllerClient, error) {
+) (*dataprocapi.ClusterControllerClient, *dataprocapi.JobControllerClient, error) {
 	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceKind, name)
 	defer span.End()
 
 	cred, err := google.FindDefaultCredentials(ctx, dataprocapi.DefaultAuthScopes()...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find default Google Cloud credentials: %w", err)
+		return nil, nil, fmt.Errorf("failed to find default Google Cloud credentials: %w", err)
 	}
 
 	userAgent, err := util.UserAgentFromContext(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	endpoint := fmt.Sprintf("%s-dataproc.googleapis.com:443", region)
-	client, err := dataprocapi.NewClusterControllerClient(ctx, option.WithEndpoint(endpoint), option.WithUserAgent(userAgent), option.WithCredentials(cred))
+	clientOptions := []option.ClientOption{
+		option.WithEndpoint(endpoint),
+		option.WithUserAgent(userAgent),
+		option.WithCredentials(cred),
+	}
+	
+	clusterClient, err := dataprocapi.NewClusterControllerClient(ctx, clientOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Dataproc client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create Dataproc cluster client: %w", err)
 	}
 
-	return client, nil
+	jobClient, err := dataprocapi.NewJobControllerClient(ctx, clientOptions...)
+	if err != nil {
+		clusterClient.Close() // Clean up the already created client
+		return nil, nil, fmt.Errorf("failed to create Dataproc JobControllerClient: %w", err)
+	}
+
+	return clusterClient, jobClient, nil
 }

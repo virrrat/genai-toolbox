@@ -82,6 +82,7 @@ import (
 	_ "github.com/googleapis/genai-toolbox/internal/tools/dataplex/dataplexsearchaspecttypes"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/dataplex/dataplexsearchentries"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/dataproc/dataproclistclusters"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/dataproc/dataproclistjobs"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/dgraph"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/firebird/firebirdexecutesql"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/firebird/firebirdsql"
