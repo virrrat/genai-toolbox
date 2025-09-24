@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
@@ -79,9 +80,10 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	allParameters := tools.Parameters{
-	    tools.NewStringParameterWithRequired("batchId", "Optional: Batch ID of the resource to fetch.", false),
+	    tools.NewStringParameterWithRequired("batchId", "Optional: Batch ID of the Serverless Spark job to fetch.", false),
 	    tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
 	    tools.NewStringParameterWithRequired("status", "Optional: One of the following: `PENDING`, `RUNNING`, `CANCELLING`, `CANCELLED`, `CANCELLED`, `FAILED`.", false),
+	    tools.NewStringParameterWithRequired("timeWindow", "Optional: Fetch batch jobs from last x hours", false),
 	}
 
 	mcpManifest := tools.McpManifest{
@@ -155,6 +157,20 @@ func CreateBatchFilter(params tools.ParamValues) (string, error) {
             part := fmt.Sprintf("labels.%s = %s", key, value)
             filterParts = append(filterParts, part)
         }
+	}
+
+	timeWindow, ok := paramsMap["timeWindow"].(string)
+	if ok {
+	    duration, err := time.ParseDuration(timeWindow)
+	    if err == nil {
+            now := time.Now()
+            pastTime := now.Add(-duration)
+            pastTimeUTC := pastTime.UTC()
+            timeString := pastTimeUTC.Format(time.RFC3339)
+
+            part := fmt.Sprintf("create_time > \"%s\"", timeString)
+            filterParts = append(filterParts, part)
+	    }
 	}
 
 	// Join the parts with " AND "
