@@ -15,17 +15,17 @@
 package dataproclistjobs
 
 import (
-	"context"
-	"fmt"
-
 	dataprocpb "cloud.google.com/go/dataproc/apiv1/dataprocpb"
+	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/sources/dataproc"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/timestamppb"
-
+	"strings"
 )
 
 const kind = "dataproc-list-jobs"
@@ -78,7 +78,10 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	// An empty parameters object will generate the correct empty schema.
-	allParameters := tools.Parameters{}
+	allParameters := tools.Parameters{
+		tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
+		tools.NewStringParameterWithRequired("status.state", "Optional: One of the following: `NON_ACTIVE`, `ACTIVE`", false),
+	}
 
 	mcpManifest := tools.McpManifest{
 		Name:        cfg.Name,
@@ -90,6 +93,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		Name:        cfg.Name,
 		Kind:        kind,
 		Source:      ds,
+		AllParams:   allParameters,
 		manifest:    tools.Manifest{Description: desc, Parameters: allParameters.Manifest()},
 		mcpManifest: mcpManifest,
 	}, nil
@@ -101,70 +105,108 @@ type Tool struct {
 	Kind        string `yaml:"kind"`
 	Description string `yaml:"description"`
 
-	Source *dataproc.Source
+	Source    *dataproc.Source
+	AllParams tools.Parameters
 
 	manifest    tools.Manifest
 	mcpManifest tools.McpManifest
 }
 
 type SimpleJob struct {
-    ProjectId      string                 `json:"project_id,omitempty"`
-    JobId          string                 `json:"job_id,omitempty"`
-    JobUuid        string                 `json:"job_uuid,omitempty"`
-    State          string                 `json:"state,omitempty"`
-    StateStartTime *timestamppb.Timestamp `json:"state_start_time,omitempty"`
-    JobType        string                 `json:"job_type,omitempty"`
+	ProjectId      string                 `json:"project_id,omitempty"`
+	JobId          string                 `json:"job_id,omitempty"`
+	JobUuid        string                 `json:"job_uuid,omitempty"`
+	State          string                 `json:"state,omitempty"`
+	StateStartTime *timestamppb.Timestamp `json:"state_start_time,omitempty"`
+	JobType        string                 `json:"job_type,omitempty"`
+}
+
+func createJobFilter(params tools.ParamValues) (string, error) {
+	paramsMap := params.AsMap()
+	var filterParts []string
+
+	labelsJSONString, ok := paramsMap["labels"].(string)
+	if ok && labelsJSONString != "" && labelsJSONString != "{}" {
+		var labels map[string]string
+		if err := json.Unmarshal([]byte(labelsJSONString), &labels); err != nil {
+			return "", fmt.Errorf("error parsing labels JSON: %w", err)
+		}
+		for key, value := range labels {
+			part := fmt.Sprintf("labels.%s = %q", key, value)
+			filterParts = append(filterParts, part)
+		}
+	}
+	return strings.Join(filterParts, " AND "), nil
 }
 
 func newSimpleJob(job *dataprocpb.Job) SimpleJob {
-    sj := SimpleJob{
-        JobUuid: job.JobUuid,
-    }
+	sj := SimpleJob{
+		JobUuid: job.JobUuid,
+	}
 
-    if job.Reference != nil {
-        sj.ProjectId = job.Reference.ProjectId
-        sj.JobId = job.Reference.JobId
-    }
+	if job.Reference != nil {
+		sj.ProjectId = job.Reference.ProjectId
+		sj.JobId = job.Reference.JobId
+	}
 
-    if job.Status != nil {
-        sj.State = job.Status.State.String()
-        sj.StateStartTime = job.Status.StateStartTime
-    }
+	if job.Status != nil {
+		sj.State = job.Status.State.String()
+		sj.StateStartTime = job.Status.StateStartTime
+	}
 
-    var jobType string
-    switch job.TypeJob.(type) {
-    case *dataprocpb.Job_HadoopJob:
-        jobType = "hadoop"
-    case *dataprocpb.Job_SparkJob:
-        jobType = "spark"
-    case *dataprocpb.Job_PysparkJob:
-        jobType = "pyspark"
-    case *dataprocpb.Job_HiveJob:
-        jobType = "hive"
-    case *dataprocpb.Job_PigJob:
-        jobType = "pig"
-    case *dataprocpb.Job_SparkRJob:
-        jobType = "spark_r"
-    case *dataprocpb.Job_SparkSqlJob:
-        jobType = "spark_sql"
-    case *dataprocpb.Job_PrestoJob:
-        jobType = "presto"
-    default:
-        jobType = "unknown"
-    }
-    sj.JobType = jobType
+	var jobType string
+	switch job.TypeJob.(type) {
+	case *dataprocpb.Job_HadoopJob:
+		jobType = "hadoop"
+	case *dataprocpb.Job_SparkJob:
+		jobType = "spark"
+	case *dataprocpb.Job_PysparkJob:
+		jobType = "pyspark"
+	case *dataprocpb.Job_HiveJob:
+		jobType = "hive"
+	case *dataprocpb.Job_PigJob:
+		jobType = "pig"
+	case *dataprocpb.Job_SparkRJob:
+		jobType = "spark_r"
+	case *dataprocpb.Job_SparkSqlJob:
+		jobType = "spark_sql"
+	case *dataprocpb.Job_PrestoJob:
+		jobType = "presto"
+	default:
+		jobType = "unknown"
+	}
+	sj.JobType = jobType
 
-    return sj
+	return sj
 }
 
 // Invoke executes the tool's operation.
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
+	filter, err := createJobFilter(params)
+	if err != nil {
+		return nil, err
+	}
+
 	req := &dataprocpb.ListJobsRequest{
 		ProjectId: t.Source.Project,
 		Region:    t.Source.Region,
-		JobStateMatcher: dataprocpb.ListJobsRequest_ACTIVE,
-
+		Filter:    filter,
 	}
+
+	matcher := dataprocpb.ListJobsRequest_ACTIVE
+	if status, ok := params.AsMap()["status"].(string); ok && status != "" {
+		switch strings.ToUpper(status) {
+		case "ALL":
+			matcher = dataprocpb.ListJobsRequest_ALL
+		case "ACTIVE":
+			matcher = dataprocpb.ListJobsRequest_ACTIVE
+		case "NON_ACTIVE":
+			matcher = dataprocpb.ListJobsRequest_NON_ACTIVE
+		default:
+			return nil, fmt.Errorf("invalid status: %q. Must be one of `ALL`, `ACTIVE`, `NON_ACTIVE`", status)
+		}
+	}
+	req.JobStateMatcher = matcher
 
 	var jobs []*dataprocpb.Job
 	it := t.Source.JobClient.ListJobs(ctx, req)
@@ -180,16 +222,16 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 	}
 
 	simpleJobs := make([]SimpleJob, 0, len(jobs))
-    for _, job := range jobs {
-        simpleJobs = append(simpleJobs, newSimpleJob(job))
-    }
+	for _, job := range jobs {
+		simpleJobs = append(simpleJobs, newSimpleJob(job))
+	}
 
-    return simpleJobs, nil
+	return simpleJobs, nil
 }
 
 // ParseParams parses and validates the input parameters.
 func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (tools.ParamValues, error) {
-	return nil, nil
+	return tools.ParseParams(t.AllParams, data, claims)
 }
 
 // Manifest returns the tool's manifest.
