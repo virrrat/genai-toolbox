@@ -24,8 +24,10 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/sources/dataproc"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"strings"
+	"time"
 )
 
 const kind = "dataproc-list-jobs"
@@ -118,7 +120,10 @@ type SimpleJob struct {
 	JobId          string                 `json:"job_id,omitempty"`
 	JobUuid        string                 `json:"job_uuid,omitempty"`
 	State          string                 `json:"state,omitempty"`
-	StateStartTime *timestamppb.Timestamp `json:"state_start_time,omitempty"`
+	Done           bool                   `json:"done,omitempty"`
+	CreateTime     *timestamppb.Timestamp `json:"create_time,omitempty"`
+	EndTime        *timestamppb.Timestamp `json:"end_time,omitempty"`
+	Duration       *durationpb.Duration   `json:"duration,omitempty"`
 	JobType        string                 `json:"job_type,omitempty"`
 }
 
@@ -146,9 +151,49 @@ func createJobFilter(params tools.ParamValues) (string, error) {
 	return strings.Join(filterParts, " AND "), nil
 }
 
+func GetJobDuration(createTimePB *timestamppb.Timestamp, endTimePB *timestamppb.Timestamp) (*durationpb.Duration, error) {
+	startTime := createTimePB.AsTime()
+
+	var endTime time.Time
+	// Check if EndTime is provided
+	if endTimePB == nil {
+		endTime = time.Now()
+	} else {
+		endTime = endTimePB.AsTime()
+	}
+
+	// Calculate duration
+	duration := endTime.Sub(startTime)
+	return durationpb.New(duration), nil
+}
+
 func newSimpleJob(job *dataprocpb.Job) SimpleJob {
 	sj := SimpleJob{
 		JobUuid: job.JobUuid,
+		Done: job.Done,
+	}
+
+	if job.StatusHistory != nil {
+		for _, status := range job.StatusHistory {
+			if status.State == dataprocpb.JobStatus_PENDING {
+				sj.CreateTime = status.StateStartTime
+				break
+			}
+		}
+	}
+
+	if job.Status != nil {
+		if job.Done {
+			sj.EndTime = job.Status.StateStartTime
+		}
+		if job.Status.State == dataprocpb.JobStatus_PENDING {
+			sj.CreateTime = job.Status.StateStartTime
+		}
+	}
+
+	duration, err := GetJobDuration(sj.CreateTime, sj.EndTime)
+	if err == nil {
+		sj.Duration = duration
 	}
 
 	if job.Reference != nil {
@@ -158,7 +203,6 @@ func newSimpleJob(job *dataprocpb.Job) SimpleJob {
 
 	if job.Status != nil {
 		sj.State = job.Status.State.String()
-		sj.StateStartTime = job.Status.StateStartTime
 	}
 
 	var jobType string
