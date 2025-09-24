@@ -32,6 +32,9 @@ tools:
   list_batches:
     kind: serverless-spark-list-batches
     source: serverless-spark-source
+  list_executors:
+    kind: serverless-spark-list-executors
+    source: serverless-spark-source
 
 toolsets:
   dataproc_tools:
@@ -39,3 +42,4 @@ toolsets:
     - list_jobs
   serverless_spark_tools:
     - list_batches
+    - list_executors
