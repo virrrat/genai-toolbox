@@ -17,6 +17,10 @@ sources:
     kind: dataproc
     project: ${DATAPROC_PROJECT}
     region: ${DATAPROC_REGION}
+  serverless-spark-source:
+    kind: serverless-spark
+    project: ${DATAPROC_PROJECT}
+    location: ${DATAPROC_REGION}
 
 tools:
   list_clusters:
@@ -25,8 +29,13 @@ tools:
   list_jobs:
     kind: dataproc-list-jobs
     source: dataproc-source
+  list_batches:
+    kind: serverless-spark-list-batches
+    source: serverless-spark-source
 
 toolsets:
   dataproc_tools:
     - list_clusters
     - list_jobs
+  serverless_spark_tools:
+    - list_batches
