@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
@@ -78,7 +79,9 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	allParameters := tools.Parameters{
-		tools.NewStringParameterWithRequired("filter", `Filter expression to limit the batches. Filters are case sensitive, and may contain multiple clauses combined with logical operators (AND/OR, case sensitive). Supported fields are batch_id, batch_uuid, state, create_time, and labels. e.g. state = RUNNING AND create_time < "2023-01-01T00:00:00Z" filters for batches in state RUNNING that were created before 2023-01-01. state = RUNNING AND labels.environment=production filters for batches in state in a RUNNING state that have a production environment label. Valid states are STATE_UNSPECIFIED, PENDING, RUNNING, CANCELLING, CANCELLED, SUCCEEDED, FAILED. Valid operators are < > <= >= = !=, and : as "has" for labels, meaning any non-empty value)`, false),
+	    tools.NewStringParameterWithRequired("batchId", "Optional: Batch ID of the resource to fetch.", false),
+	    tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
+	    tools.NewStringParameterWithRequired("status", "Optional: One of the following: `PENDING`, `RUNNING`, `CANCELLING`, `CANCELLED`, `CANCELLED`, `FAILED`.", false),
 	}
 
 	mcpManifest := tools.McpManifest{
@@ -124,6 +127,40 @@ type apiListBatchesResponse struct {
 	NextPageToken string     `json:"nextPageToken"`
 }
 
+func CreateBatchFilter(params tools.ParamValues) (string, error) {
+	paramsMap := params.AsMap()
+
+	var filterParts []string
+
+	batchId, ok := paramsMap["batchId"].(string)
+	if ok && batchId != "" {
+	    part := fmt.Sprintf("batch_id = %s", batchId)
+	    filterParts = append(filterParts, part)
+	}
+
+	status, ok := paramsMap["status"].(string)
+	if ok && status != "" {
+	    part := fmt.Sprintf("state = %s", status)
+	    filterParts = append(filterParts, part)
+	}
+
+	labelsJsonString, ok := paramsMap["labels"].(string)
+
+	if ok && labelsJsonString != "" && labelsJsonString != "{}" {
+	    var labels map[string]string
+	    json.Unmarshal([]byte(labelsJsonString), &labels)
+
+        for key, value := range labels {
+            // Construct each label filter part as "labels.KEY = VALUE"
+            part := fmt.Sprintf("labels.%s = %s", key, value)
+            filterParts = append(filterParts, part)
+        }
+	}
+
+	// Join the parts with " AND "
+	return strings.Join(filterParts, " AND "), nil
+}
+
 // Invoke executes the tool's operation.
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
 	urlString := fmt.Sprintf("%s/v1/projects/%s/locations/%s/batches", t.Source.BaseURL, t.Source.Project, t.Source.Location)
@@ -131,8 +168,9 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 	if err != nil {
 		return nil, fmt.Errorf("error parsing URL %s: %w", urlString, err)
 	}
-	filter, ok := params.AsMap()["filter"].(string)
-	if ok {
+
+	filter, err := CreateBatchFilter(params)
+	if err == nil {
 		q := u.Query()
 		q.Add("filter", filter)
 		u.RawQuery = q.Encode()
