@@ -200,7 +200,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		Filter:    filter,
 	}
 
-	matcher := dataprocpb.ListJobsRequest_ACTIVE
+	matcher := dataprocpb.ListJobsRequest_ALL
 	if status, ok := params.AsMap()["status"].(string); ok && status != "" {
 		switch strings.ToUpper(status) {
 		case "ALL":
@@ -226,6 +226,9 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 			return nil, fmt.Errorf("error listing Dataproc jobs: %w", err)
 		}
 		jobs = append(jobs, resp)
+		if len(jobs) >= 1000 {
+            break
+    	}
 	}
 
 	simpleJobs := make([]SimpleJob, 0, len(jobs))
