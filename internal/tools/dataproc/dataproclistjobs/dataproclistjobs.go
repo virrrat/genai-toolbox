@@ -80,7 +80,8 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// An empty parameters object will generate the correct empty schema.
 	allParameters := tools.Parameters{
 		tools.NewStringParameterWithRequired("labels", "Optional: Resource labels as JSON string", false),
-		tools.NewStringParameterWithRequired("status.state", "Optional: One of the following: `NON_ACTIVE`, `ACTIVE`", false),
+		tools.NewStringParameterWithRequired("status", "Optional: One of the following: `NON_ACTIVE`, `ACTIVE`", false),
+		tools.NewStringParameterWithRequired("clusterName", "Optional:The name of the cluster", false),
 	}
 
 	mcpManifest := tools.McpManifest{
@@ -135,6 +136,12 @@ func createJobFilter(params tools.ParamValues) (string, error) {
 			part := fmt.Sprintf("labels.%s = %q", key, value)
 			filterParts = append(filterParts, part)
 		}
+	}
+
+	clusterName, ok := paramsMap["clusterName"].(string)
+	if ok && clusterName != "" {
+	    part := fmt.Sprintf("placement.clusterName = %s", clusterName)
+	    filterParts = append(filterParts, part)
 	}
 	return strings.Join(filterParts, " AND "), nil
 }
