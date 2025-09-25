@@ -28,6 +28,7 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/sources/serverlessspark"
 	"github.com/googleapis/genai-toolbox/internal/tools"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 const kind = "serverless-spark-list-batches"
@@ -119,6 +120,7 @@ type apiBatch struct {
 	Name       string `json:"name"`
 	UUID       string `json:"uuid"`
 	State      string `json:"state"`
+	StateTime  string `json:"stateTime"`
 	Creator    string `json:"creator"`
 	CreateTime string `json:"createTime"`
 }
@@ -127,6 +129,17 @@ type apiBatch struct {
 type apiListBatchesResponse struct {
 	Batches       []apiBatch `json:"batches"`
 	NextPageToken string     `json:"nextPageToken"`
+}
+
+type SimpleBatch struct {
+    Name       string `json:"name"`
+    UUID       string `json:"uuid"`
+    State      string `json:"state"`
+    StateTime  string `json:"stateTime"`
+    Creator    string `json:"creator"`
+    CreateTime string `json:"createTime"`
+    EndTime    string `json:"endTime"`
+    Duration   *durationpb.Duration `json:"duration"`
 }
 
 func CreateBatchFilter(params tools.ParamValues) (string, error) {
@@ -220,17 +233,9 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
 
-	type SimpleBatch struct {
-		Name       string `json:"name"`
-		UUID       string `json:"uuid"`
-		State      string `json:"state"`
-		Creator    string `json:"creator"`
-		CreateTime string `json:"createTime"`
-	}
-
 	simpleBatches := make([]SimpleBatch, 0, len(listResponse.Batches))
 	for _, batch := range listResponse.Batches {
-		simpleBatches = append(simpleBatches, SimpleBatch(batch))
+		simpleBatches = append(simpleBatches, newSimpleBatch(&batch))
 	}
 
 	type SimpleListBatchesResponse struct {
@@ -242,6 +247,48 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		Batches:       simpleBatches,
 		NextPageToken: listResponse.NextPageToken,
 	}, nil
+}
+
+func newSimpleBatch(batch *apiBatch) SimpleBatch {
+	sb := SimpleBatch{
+		Name: batch.Name,
+		UUID: batch.UUID,
+		State: batch.State,
+		StateTime: batch.StateTime,
+		Creator: batch.Creator,
+		CreateTime: batch.CreateTime,
+	}
+
+	if batch.State == "SUCCEEDED" || batch.State == "CANCELLED" || batch.State == "FAILED" {
+		sb.EndTime = batch.StateTime
+	}
+
+	duration, err := GetBatchDuration(sb.CreateTime, sb.EndTime)
+	if err == nil {
+		sb.Duration = duration
+	}
+
+	return sb
+}
+
+func GetBatchDuration(startTimeStr string, endTimeStr string) (*durationpb.Duration, error) {
+	// Parse the start time string.
+	startTime, _ := time.Parse(time.RFC3339Nano, startTimeStr)
+
+	var endTime time.Time
+	// Check if endTimeStr is provided.
+	if endTimeStr == "" {
+		endTime = time.Now()
+	} else {
+		// Parse the end time string.
+		endTime, _ = time.Parse(time.RFC3339Nano, endTimeStr)
+	}
+
+	// Calculate the duration.
+	duration := endTime.Sub(startTime)
+
+	// Convert the time.Duration to a durationpb.Duration.
+	return durationpb.New(duration), nil
 }
 
 // ParseParams parses and validates the input parameters.
