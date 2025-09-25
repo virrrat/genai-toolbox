@@ -132,7 +132,7 @@ type apiListBatchesResponse struct {
 }
 
 type SimpleBatch struct {
-    Name       string `json:"name"`
+    Id         string `json:"id"`
     UUID       string `json:"uuid"`
     State      string `json:"state"`
     StateTime  string `json:"stateTime"`
@@ -251,13 +251,15 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 
 func newSimpleBatch(batch *apiBatch) SimpleBatch {
 	sb := SimpleBatch{
-		Name: batch.Name,
 		UUID: batch.UUID,
 		State: batch.State,
 		StateTime: batch.StateTime,
 		Creator: batch.Creator,
 		CreateTime: batch.CreateTime,
 	}
+
+	parts := strings.Split(batch.Name, "/")
+	sb.Id = parts[len(parts) -1]
 
 	if batch.State == "SUCCEEDED" || batch.State == "CANCELLED" || batch.State == "FAILED" {
 		sb.EndTime = batch.StateTime
